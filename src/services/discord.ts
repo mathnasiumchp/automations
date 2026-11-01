@@ -1,5 +1,15 @@
-import { formatInTimeZone } from "date-fns-tz";
-import { Client, GatewayIntentBits } from "discord.js";
+import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  Client,
+  ComponentType,
+  GatewayIntentBits,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
+  type TextBasedChannel,
+} from "discord.js";
 import { dollarFormatter, formatMessage } from "../utils.js";
 import { getSpreadsheetData, getStudentList } from "./googleSheets.js";
 
@@ -91,7 +101,7 @@ export async function sendPaymentAttemptsReport(
   const timezone = "America/Chicago";
 
   await channel.send(
-    `# 💳 Payment Attempts Report - ${formatInTimeZone(today, timezone, "eee, MMM d")}\n-# Below is an auto-generated card expiration report for the week of ${formatInTimeZone(today, timezone, "MM/dd/yyyy")}. [Click here](https://radius.mathnasium.com/BillingExceptionsReport) to navigate to the Radius Billing Exceptions Report. For any questions or concerns, please reach out to the admin team.\n\n` +
+    `# 💳 Payment Attempts Report - ${formatInTimeZone(today, timezone, "eee, MMM d")}\n-# Below is an auto-generated payment attempts report for the week of ${formatInTimeZone(today, timezone, "MM/dd/yyyy")}. [Click here](https://radius.mathnasium.com/BillingExceptionsReport) to navigate to the Radius Billing Exceptions Report. For any questions or concerns, please reach out to the admin team.\n\n` +
       successfulPaymentAttemptsList,
   );
 }
@@ -398,7 +408,7 @@ export async function sendAssessmentReport() {
 }
 
 export async function sendAttendanceReport(students: string[]) {
-  const leadTeamChannel = await fetchChannel("automated-reminders");
+  const leadTeamChannel = await fetchChannel("test-channel");
 
   // Check if the channels exists AND are text-based channels
   if (!leadTeamChannel) {
@@ -437,6 +447,212 @@ export async function sendAttendanceReport(students: string[]) {
   }
 
   console.log(students);
+
+  // await promptForParentMessages(leadTeamChannel, students);
+}
+
+export async function promptForParentMessages(
+  channel: TextBasedChannel & { send: (...args: any[]) => Promise<any> },
+  students: string[],
+) {
+  const millisecondsUntilEndOfDay = (): number => {
+    const now = new Date();
+    const timezone = "America/Chicago";
+    const zonedNow = toZonedTime(now, timezone);
+
+    const midnight = new Date(zonedNow);
+    midnight.setHours(24, 0, 0, 0);
+
+    return Math.max(
+      0,
+      fromZonedTime(midnight, timezone).getTime() - now.getTime(),
+    );
+  };
+
+  // Step 1: Ask whether to proceed.
+  const prompt = await channel.send({
+    content:
+      "**📱 Would you like me to send text messages to families about their child(ren)'s attendance?**",
+    components: [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId("attendance_yes")
+          .setLabel("Yes, please")
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId("attendance_no")
+          .setLabel("No, thank you")
+          .setStyle(ButtonStyle.Secondary),
+      ),
+    ],
+  });
+
+  const decision = await prompt
+    .awaitMessageComponent({
+      componentType: ComponentType.Button,
+      time: millisecondsUntilEndOfDay(),
+    })
+    .catch(() => null);
+
+  // Disable the buttons after the decision or timeout.
+  await prompt.edit({ components: [] }).catch(() => {});
+
+  if (!decision) {
+    await channel.send(
+      "Update: I won't follow-up with families since nobody responded in time.",
+    );
+    return;
+  }
+
+  if (decision.customId === "attendance_no") {
+    await decision.reply({
+      content: "No worries! No messages will be sent.",
+      ephemeral: true,
+    });
+    await channel.send("I will skip attendance follow-up for today.");
+    return;
+  }
+
+  await decision.deferUpdate();
+
+  // Step 2: Ask which students to exclude.
+  const exclusionMenu = new StringSelectMenuBuilder()
+    .setCustomId("attendance_exclusions")
+    .setPlaceholder("Select students to exclude...")
+    .setMinValues(0)
+    .setMaxValues(Math.min(students.length, 25))
+    .addOptions(
+      students
+        // .slice(0, 25)
+        .map((student) => student.match(/\[(.*?)\]/)?.[1])
+        .filter((student) => typeof student === "string")
+        .map((student, i) =>
+          new StringSelectMenuOptionBuilder()
+            .setLabel(student)
+            .setValue(String(i)),
+        ),
+    );
+
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    exclusionMenu,
+  );
+
+  const exclusionPrompt = await channel.send({
+    content:
+      "\n**Which students should be excluded from parent follow-up?**\n" +
+      "Select all that apply, then submit. If nobody needs to be excluded, leave the selection empty.",
+    components: [row],
+  });
+
+  /* // Step 2: Ask which students to exclude.
+  await channel.send(
+    [
+      "📝 **Are there any students to exclude from parent follow-up?**",
+      "Reply with their names separated by commas, or reply `none`.",
+      "Only the person who clicked **Yes, proceed** can submit the exclusions.",
+      "You have 5 minutes to respond.",
+    ].join("\n"),
+  );
+
+  const filter = (message: Message) =>
+    message.author.id === decision.user.id &&
+    message.channelId === prompt.channelId &&
+    !message.author.bot;
+
+  const replies = await channel
+    .awaitMessages({
+      filter,
+      max: 1,
+      time: 5 * 60 * 1000,
+    })
+    .catch(() => null);
+
+  const reply = replies?.first();
+
+  if (!reply) {
+    await channel.send(
+      "⌛ No exclusion list was received. No parent messages will be sent.",
+    );
+    return;
+  }
+
+  const excludedNames =
+    reply.content.trim().toLowerCase() === "none"
+      ? []
+      : reply.content
+          .split(",")
+          .map((name) => name.trim())
+          .filter(Boolean);
+
+  // Match exclusions against the student list, ignoring capitalization.
+  const excludedSet = new Set(excludedNames.map((name) => name.toLowerCase()));
+
+  const studentsToContact = students.filter(
+    (student) => !excludedSet.has(student.trim().toLowerCase()),
+  );
+
+  // Step 3: Confirm the final list before taking action.
+  const confirmation = await channel.send({
+    content: [
+      "📋 **Please confirm the parent follow-up list:**",
+      "",
+      studentsToContact.length
+        ? studentsToContact.map((student) => `• ${student}`).join("\n")
+        : "_No students remain on the list._",
+      "",
+      `Excluded: ${excludedNames.length ? excludedNames.join(", ") : "None"}`,
+      "",
+      "Should the bot send the parent messages?",
+    ].join("\n"),
+    components: [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId("attendance_confirm")
+          .setLabel("Confirm and send")
+          .setStyle(ButtonStyle.Success)
+          .setDisabled(studentsToContact.length === 0),
+        new ButtonBuilder()
+          .setCustomId("attendance_cancel")
+          .setLabel("Cancel")
+          .setStyle(ButtonStyle.Danger),
+      ),
+    ],
+  });
+
+  const finalDecision = await confirmation
+    .awaitMessageComponent({
+      componentType: ComponentType.Button,
+      time: 5 * 60 * 1000,
+      // Restrict the final decision to the person who started the workflow.
+      filter: (interaction) => interaction.user.id === decision.user.id,
+    })
+    .catch(() => null);
+
+  await confirmation.edit({ components: [] }).catch(() => {});
+
+  if (!finalDecision || finalDecision.customId === "attendance_cancel") {
+    if (finalDecision) {
+      await finalDecision.update({
+        content: "Follow-up cancelled. No parent messages were sent.",
+        components: [],
+      });
+    } else {
+      await channel.send(
+        "⌛ Confirmation timed out. No parent messages were sent.",
+      );
+    }
+    return;
+  }
+
+  await finalDecision.update({
+    content: "✅ Confirmed. Preparing parent follow-up messages...",
+    components: [],
+  });
+
+  // TODO: Call your actual parent-messaging function here.
+  // await sendParentAttendanceMessages(studentsToContact);
+
+  console.log("Students approved for parent follow-up:", studentsToContact); */
 }
 
 export async function sendErrorNotification(message: string) {

@@ -14,12 +14,10 @@ import {
   sendBirthdayReport,
   sendCardExpirationReport,
   sendEODStudentReport,
-  sendPaymentAttemptsReport,
   sendReconciliationReport,
 } from "./services/discord.js";
 import { writeSpreadsheetData } from "./services/googleSheets.js";
 import {
-  handleDelayedRadiusOperations,
   handleInstantRadiusOperations,
   handleWeeklyRadiusOperations,
 } from "./services/radius.js";
@@ -46,9 +44,9 @@ discordClient.once("clientReady", async () => {
         console.log("Skipping automation due to center closure.");
         return;
       }
-      const { successfulPaymentAttemptsList } =
-        await handleDelayedRadiusOperations();
-      await sendPaymentAttemptsReport(successfulPaymentAttemptsList);
+      // const { successfulPaymentAttemptsList } =
+      //   await handleDelayedRadiusOperations();
+      // await sendPaymentAttemptsReport(successfulPaymentAttemptsList);
     },
     { timezone: "America/Chicago" },
   );
@@ -155,6 +153,20 @@ discordClient.once("clientReady", async () => {
       }
       const { checkedInStudents } = await handleInstantRadiusOperations();
       await sendEODStudentReport(checkedInStudents);
+    },
+    { timezone: "America/Chicago" },
+  );
+
+  // Sat at 9:00 AM
+  // DaySmart automation - Update spots ahead of Sunday.
+  cron.schedule(
+    "0 9 * * 6",
+    async () => {
+      if (isHolidayOrClosure()) {
+        console.log("Skipping automation due to center closure.");
+        return;
+      }
+      await createScheduleExceptions();
     },
     { timezone: "America/Chicago" },
   );
