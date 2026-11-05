@@ -660,7 +660,7 @@ export async function retryFailedPayments(page: Page): Promise<string> {
 
   // Get all failed payment methods this month
   const failedPayments = await page.$$eval("tr.k-master-row", (rows) => {
-    return rows.map((row, i) => {
+    return rows.map((row) => {
       const paymentDetails: string[] =
         row.cells[2]?.innerText.split("\n") || [];
       const accountName = row.cells[3]?.innerText;
@@ -697,13 +697,29 @@ export async function retryFailedPayments(page: Page): Promise<string> {
     });
   });
 
-  // Go through each failed payment
+  // Go through each failed payment, skipping exceptions
+  const accountLinkExceptions: string[] = [
+    "https://radius.mathnasium.com/CustomerAccount/Details/cd8c5739-24ce-47dc-a393-e8f650f3233a", // Harrison Baker (Malcolm Baker)
+    "https://radius.mathnasium.com/CustomerAccount/Details/bd77d09b-4ba9-4fe3-98c6-b4db514cd42f", // Ariel Howard (Christian Moody)
+  ];
+
   for (let i = 0; i < failedPayments.length; i++) {
     const payment = failedPayments[i];
     if (!payment) continue;
 
-    const { accountName, amount, invoicesLink, paymentMethodLink } = payment;
-    if (!paymentMethodLink || !invoicesLink) continue;
+    const {
+      accountName,
+      accountLink,
+      amount,
+      invoicesLink,
+      paymentMethodLink,
+    } = payment;
+    if (
+      !paymentMethodLink ||
+      !invoicesLink ||
+      (accountLink && accountLinkExceptions.includes(accountLink))
+    )
+      continue;
 
     await page.goto(paymentMethodLink);
     await page.waitForSelector("tr.k-master-row");
@@ -744,8 +760,8 @@ export async function retryFailedPayments(page: Page): Promise<string> {
           `Past due balance with ${dollarFormatter.format(LATE_FEE)} late fee`,
           { delay: 100 },
         );
-        // await page.keyboard.press("Tab");
-        // await page.keyboard.press("Enter");
+        await page.keyboard.press("Tab");
+        await page.keyboard.press("Enter");
 
         const successMessage =
           `${i + 1}. ${accountName}` +

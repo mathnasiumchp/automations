@@ -14,10 +14,12 @@ import {
   sendBirthdayReport,
   sendCardExpirationReport,
   sendEODStudentReport,
+  sendPaymentAttemptsReport,
   sendReconciliationReport,
 } from "./services/discord.js";
 import { writeSpreadsheetData } from "./services/googleSheets.js";
 import {
+  handleDelayedRadiusOperations,
   handleInstantRadiusOperations,
   handleWeeklyRadiusOperations,
 } from "./services/radius.js";
@@ -36,7 +38,7 @@ discordClient.once("clientReady", async () => {
   console.log(`Logged into Discord as ${discordClient.user.tag}`);
 
   // Sun-Thu at 3:00 AM
-  // Delayed Operations - Get assessment info
+  // Delayed Operations - Get assessment info and retry failed payments
   cron.schedule(
     "0 3 * * 0-4",
     async () => {
@@ -44,17 +46,17 @@ discordClient.once("clientReady", async () => {
         console.log("Skipping automation due to center closure.");
         return;
       }
-      // const { successfulPaymentAttemptsList } =
-      //   await handleDelayedRadiusOperations();
-      // await sendPaymentAttemptsReport(successfulPaymentAttemptsList);
+      const { successfulPaymentAttemptsList } =
+        await handleDelayedRadiusOperations();
+      await sendPaymentAttemptsReport(successfulPaymentAttemptsList);
     },
     { timezone: "America/Chicago" },
   );
 
-  // Sun at 9:00 AM
+  // Sun at 1:00 PM
   // Weekly Operations - Get student birthday info, expiring card info, and attendance data.
   cron.schedule(
-    "0 9 * * 0",
+    "0 13 * * 0",
     async () => {
       if (isHolidayOrClosure()) {
         console.log("Skipping automation due to center closure.");
@@ -69,10 +71,10 @@ discordClient.once("clientReady", async () => {
     { timezone: "America/Chicago" },
   );
 
-  // Sun-Thu at 9:00 AM
+  // Sun-Thu at 1:00 PM
   // BOD Operations - Get student appointments, enrolled students, and payment issues.
   cron.schedule(
-    "0 9 * * 0-4",
+    "0 13 * * 0-4",
     async () => {
       if (isHolidayOrClosure()) {
         console.log("Skipping automation due to center closure.");
