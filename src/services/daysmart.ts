@@ -277,7 +277,7 @@ export async function createScheduleExceptions() {
   // Read Google spreadsheet
   try {
     const scheduleExceptionsListData = await getSpreadsheetData(
-      "Instruction Scheduler",
+      "Instruction Dashboard",
       "'DaySmart (Schedule Exceptions) - HELPER 2'!E2:H",
     );
 

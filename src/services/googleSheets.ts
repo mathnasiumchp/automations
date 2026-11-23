@@ -9,7 +9,8 @@ const __dirname = dirname(__filename);
 config({ path: join(__dirname, "../../.env.local") });
 
 const spreadsheets = new Map([
-  ["Instruction Scheduler", "1TKA8M9LQciU_NjYczRDpWzhBAYeVFEPPSvhs3UBY4tg"],
+  ["Instruction Dashboard", "1TKA8M9LQciU_NjYczRDpWzhBAYeVFEPPSvhs3UBY4tg"],
+  ["Admin Dashboard", "12E2tlpaJI8MnQuKlzLDorWO8dKJ6C5GLF9jRcELYto8"],
 ] as const);
 
 type SpreadsheetName = Parameters<typeof spreadsheets.get>[0];
@@ -125,7 +126,7 @@ export async function clearSpreadsheetData(
 
 export async function getStudentList(status: string): Promise<string> {
   const data = await getSpreadsheetData(
-    "Instruction Scheduler",
+    "Instruction Dashboard",
     "Admin View!O2:AB77",
   );
   const headers = data[0];

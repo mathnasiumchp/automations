@@ -6,8 +6,24 @@ const HOLIDAYS_AND_CLOSURES = [
   "2026-07-04", // 4th of July
   "2026-09-07", // Labor Day
   "2026-10-12", // Indigenous Peoples' Day
-  "2026-11-26", // Thanksgiving
-  "2026-12-25", // Christmas
+  "2026-11-11", // Veterans Day
+  "2026-11-24", // Thanksgiving Break
+  "2026-11-25", // Thanksgiving Break
+  "2026-11-26", // Thanksgiving Break
+  "2026-12-20", // Winter Break
+  "2026-12-21", // Winter Break
+  "2026-12-22", // Winter Break
+  "2026-12-23", // Winter Break
+  "2026-12-24", // Winter Break
+  "2026-12-25", // Winter Break
+  "2026-12-26", // Winter Break
+  "2026-12-27", // Winter Break
+  "2026-12-28", // Winter Break
+  "2026-12-29", // Winter Break
+  "2026-12-30", // Winter Break
+  "2026-12-31", // Winter Break
+  "2027-01-01", // Winter Break
+  "2027-01-02", // Winter Break
 ];
 
 export function isHolidayOrClosure(): boolean {
@@ -24,6 +40,39 @@ export function isHolidayOrClosure(): boolean {
   const formattedDate = `${year}-${month}-${day}`;
 
   return HOLIDAYS_AND_CLOSURES.includes(formattedDate);
+}
+
+export function isBusinessHours(): boolean {
+  if (isHolidayOrClosure()) {
+    return false;
+  }
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    weekday: "short",
+    hour: "numeric",
+    minute: "numeric",
+    hour12: false,
+  }).formatToParts(new Date());
+
+  const get = (type: string) => parts.find((part) => part.type === type)?.value;
+
+  const day = get("weekday");
+  const hour = Number(get("hour"));
+  const minute = Number(get("minute"));
+
+  const time = hour * 60 + minute;
+  const buffer = 15; // Minutes after close that notifications should remain active for
+
+  if (day === "Sun") {
+    return time >= 780 && time < 1020 + buffer; // Between 1 and 5 PM
+  }
+
+  if (["Mon", "Tue", "Wed", "Thu"].includes(day!)) {
+    return time >= 780 && time < 1170 + buffer; // Between 1 and 7:30 PM
+  }
+
+  return false;
 }
 
 export const dollarFormatter = new Intl.NumberFormat("en-US", {

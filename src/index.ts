@@ -14,14 +14,17 @@ import {
   sendBirthdayReport,
   sendCardExpirationReport,
   sendEODStudentReport,
-  sendPaymentAttemptsReport,
   sendReconciliationReport,
 } from "./services/discord.js";
-import { writeSpreadsheetData } from "./services/googleSheets.js";
 import {
-  handleDelayedRadiusOperations,
-  handleInstantRadiusOperations,
-  handleWeeklyRadiusOperations,
+  clearSpreadsheetData,
+  writeSpreadsheetData,
+} from "./services/googleSheets.js";
+import {
+  handleBODRadiusOps,
+  handleEODRadiusOps,
+  handleOvernightRadiusOps,
+  handleWeeklyRadiusOps,
 } from "./services/radius.js";
 import { isHolidayOrClosure } from "./utils.js";
 
@@ -46,24 +49,22 @@ discordClient.once("clientReady", async () => {
         console.log("Skipping automation due to center closure.");
         return;
       }
-      const { successfulPaymentAttemptsList } =
-        await handleDelayedRadiusOperations();
-      await sendPaymentAttemptsReport(successfulPaymentAttemptsList);
+      await handleOvernightRadiusOps();
     },
     { timezone: "America/Chicago" },
   );
 
-  // Sun at 1:00 PM
+  // Sun at 9:00 AM
   // Weekly Operations - Get student birthday info, expiring card info, and attendance data.
   cron.schedule(
-    "0 13 * * 0",
+    "0 9 * * 0",
     async () => {
       if (isHolidayOrClosure()) {
         console.log("Skipping automation due to center closure.");
         return;
       }
       const { birthdays, cardsExpiringList, nonAttendingStudents } =
-        await handleWeeklyRadiusOperations();
+        await handleWeeklyRadiusOps();
       await sendBirthdayReport(birthdays);
       await sendCardExpirationReport(cardsExpiringList);
       await sendAttendanceReport(nonAttendingStudents);
@@ -71,10 +72,10 @@ discordClient.once("clientReady", async () => {
     { timezone: "America/Chicago" },
   );
 
-  // Sun-Thu at 1:00 PM
+  // Sun-Thu at 9:00 AM
   // BOD Operations - Get student appointments, enrolled students, and payment issues.
   cron.schedule(
-    "0 13 * * 0-4",
+    "0 9 * * 0-4",
     async () => {
       if (isHolidayOrClosure()) {
         console.log("Skipping automation due to center closure.");
@@ -108,21 +109,50 @@ discordClient.once("clientReady", async () => {
           return result;
         });
 
+      await clearSpreadsheetData(
+        "Instruction Dashboard",
+        "'DaySmart (All Data)'!B2:H",
+      );
       await writeSpreadsheetData(
-        "Instruction Scheduler",
+        "Instruction Dashboard",
         "'DaySmart (All Data)'!B2:H",
         allAppointments,
       );
 
+      await clearSpreadsheetData("Instruction Dashboard", "DaySmart!B2:G");
       await writeSpreadsheetData(
-        "Instruction Scheduler",
+        "Instruction Dashboard",
         "DaySmart!B2:G",
         dailyAppointments,
       );
 
       await createScheduleExceptions();
 
-      const { payments, totalExpected } = await handleInstantRadiusOperations();
+      const { payments, /* successfulPaymentAttemptsList, */ totalExpected } =
+        await handleBODRadiusOps();
+
+      const students = payments
+        .map((payment) => {
+          const students: string[] = payment[2] as string[];
+          return students;
+        })
+        .flat(Infinity);
+      const flaggedStudents: string[][] = [...new Set(students)]
+        .sort()
+        .map((student) => [student]) as string[][];
+
+      await clearSpreadsheetData(
+        "Instruction Dashboard",
+        "'Flagged Students - HELPER'!A:A",
+      );
+
+      await writeSpreadsheetData(
+        "Instruction Dashboard",
+        "'Flagged Students - HELPER'!A:A",
+        flaggedStudents,
+      );
+
+      // await sendPaymentAttemptsReport(successfulPaymentAttemptsList);
       await sendReconciliationReport(payments, totalExpected);
       await sendAssessmentReport();
     },
@@ -138,7 +168,7 @@ discordClient.once("clientReady", async () => {
         console.log("Skipping automation due to center closure.");
         return;
       }
-      const { checkedInStudents } = await handleInstantRadiusOperations();
+      const { checkedInStudents } = await handleEODRadiusOps();
       await sendEODStudentReport(checkedInStudents);
     },
     { timezone: "America/Chicago" },
@@ -153,7 +183,7 @@ discordClient.once("clientReady", async () => {
         console.log("Skipping automation due to center closure.");
         return;
       }
-      const { checkedInStudents } = await handleInstantRadiusOperations();
+      const { checkedInStudents } = await handleEODRadiusOps();
       await sendEODStudentReport(checkedInStudents);
     },
     { timezone: "America/Chicago" },

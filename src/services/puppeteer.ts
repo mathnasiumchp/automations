@@ -3,6 +3,7 @@ import puppeteer, { Browser, Page, type KeyInput } from "puppeteer";
 export async function launchPuppeteer(headless = true) {
   const browser: Browser = await puppeteer.launch({
     headless,
+    defaultViewport: { width: 1280, height: 800 },
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -23,4 +24,8 @@ export async function pressKeyNTimes(
     await page.keyboard.press(button);
     await new Promise((r) => setTimeout(r, 10));
   }
+}
+
+export function delay(seconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }

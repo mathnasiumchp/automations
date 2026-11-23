@@ -7,7 +7,7 @@ A Node.js + TypeScript bot that automates end-of-day student session reporting f
 ## Features
 
 - **Scheduled reporting** — automatically runs on weekday evenings (Mon–Thu at 7:45 PM) and Sundays (5:15 PM), Chicago time
-- **Google Sheets integration** — reads student session statuses (Last-Minute, Cancelled, No Show) from the Instruction Scheduler spreadsheet
+- **Google Sheets integration** — reads student session statuses (Last-Minute, Cancelled, No Show) from the Instruction Dashboard spreadsheet
 - **Radius CRM scraping** — uses Puppeteer to log into the Radius attendance roster and detect students who are still checked in
 - **Discord delivery** — posts a formatted reports to designated Discord channels
 
@@ -79,7 +79,7 @@ Place your Google Cloud service account JSON file at the project root and name i
 service-account.json
 ```
 
-The service account must have read access to the Instruction Scheduler spreadsheet.
+The service account must have read access to the Instruction Dashboard spreadsheet.
 
 ### 4. Build and run
 
@@ -120,7 +120,7 @@ The report is built from four data sources fetched in parallel and joined into a
 
 ### Google Sheets (`googleSheets.ts`)
 
-Reads the range `Admin View!O2:AB77` from the Instruction Scheduler spreadsheet. Filters rows by the `Status` column and formats each student as:
+Reads the range `Admin View!O2:AB77` from the Instruction Dashboard spreadsheet. Filters rows by the `Status` column and formats each student as:
 
 ```
 1. Student Name *(HH:MM AM/PM)*
@@ -137,7 +137,7 @@ Reads the range `Admin View!O2:AB77` from the Instruction Scheduler spreadsheet.
 
 ### Discord Delivery (`discord.ts`)
 
-Posts to the `lead-team` channel. The message includes the date, a link to the Instruction Scheduler spreadsheet, and each of the four report sections separated by dividers.
+Posts to the `lead-team` channel. The message includes the date, a link to the Instruction Dashboard spreadsheet, and each of the four report sections separated by dividers.
 
 ---
 

@@ -4,8 +4,12 @@ import { dirname, join } from "path";
 import type { Page } from "puppeteer";
 import { fileURLToPath } from "url";
 import { dollarFormatter } from "../utils.js";
-import { writeSpreadsheetData } from "./googleSheets.js";
-import { launchPuppeteer, pressKeyNTimes } from "./puppeteer.js";
+import {
+  clearSpreadsheetData,
+  getSpreadsheetData,
+  writeSpreadsheetData,
+} from "./googleSheets.js";
+import { delay, launchPuppeteer, pressKeyNTimes } from "./puppeteer.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -38,44 +42,35 @@ export async function logIntoRadius(page: Page) {
   await console.log(`Logged into Radius as ${username}`);
 }
 
-export async function handleInstantRadiusOperations() {
+export async function handleBODRadiusOps() {
   const { browser, page } = await launchPuppeteer();
   await logIntoRadius(page);
-  const checkedInStudents = await getCheckedInStudents(page);
-  const enrolledStudents = await getEnrolledStudents(page);
-
-  // await clearSpreadsheetData(
-  //   "Instruction Scheduler",
-  //   "Radius Students - HELPER!A2:B",
-  // );
-  // await writeSpreadsheetData(
-  //   "Instruction Scheduler",
-  //   "Radius Students - HELPER!A2:B",
-  //   enrolledStudents,
-  // );
-
+  // const successfulPaymentAttemptsList = await retryFailedPayments(page);
   const { payments, totalExpected } = await getPayments(page);
   await browser.close();
 
-  return {
-    checkedInStudents,
-    enrolledStudents,
-    payments,
-    totalExpected,
-  };
+  // return { payments, successfulPaymentAttemptsList, totalExpected };
+  return { payments, totalExpected };
 }
 
-export async function handleDelayedRadiusOperations() {
+export async function handleEODRadiusOps() {
+  const { browser, page } = await launchPuppeteer();
+  await logIntoRadius(page);
+  const checkedInStudents = await getCheckedInStudents(page);
+  await browser.close();
+
+  return { checkedInStudents };
+}
+
+export async function handleOvernightRadiusOps() {
   const { browser, page } = await launchPuppeteer();
   await logIntoRadius(page);
   const enrolledStudents = await getEnrolledStudents(page);
   await getAssessmentInfo(page, enrolledStudents);
-  const successfulPaymentAttemptsList = await retryFailedPayments(page);
   await browser.close();
-  return { successfulPaymentAttemptsList };
 }
 
-export async function handleWeeklyRadiusOperations() {
+export async function handleWeeklyRadiusOps() {
   const { browser, page } = await launchPuppeteer();
   await logIntoRadius(page);
   const birthdays = await getStudentBirthdays(page);
@@ -87,6 +82,46 @@ export async function handleWeeklyRadiusOperations() {
 }
 
 // —————————————————————————————————————————————————— //
+
+interface Invoice {
+  BillingDate: string;
+  BillingDateString: string;
+  BillingDateString2: string;
+  InvoiceNumber: string;
+  InvoiceDisplayNumber: string;
+  PaymentStatusString: string;
+  PaymentStatus: number;
+  MembershipCharge: number;
+  MembershipChargeString: string;
+  TotalDiscount: number;
+  TotalDiscountString: string;
+  HasCreditFeeToZero: boolean;
+  CreditsAndFees: number;
+  CreditsAndFeesString: string;
+  AmountTax: number;
+  AmountTaxString: string;
+  AmountExpected: number;
+  AmountExpectedString: string;
+  AmountExpectedNoTax: number;
+  AmountExpectedNoTaxString: string;
+  AmountPaid: number;
+  ShowTransactionsButton: boolean;
+  ShowEditDeleteButtons: boolean;
+  ShowRefundButton: boolean;
+  AmountPaidString: string;
+  AmountDue: number;
+  AmountDueString: string;
+  PaymentMethodDescription: string;
+  BillPayerName: string;
+  PaymentDate: null;
+  PaymentDateString: string;
+  NotesHtml: string[];
+  NotesHtmlString: string;
+  GuardianId: number;
+  InvoiceId: number;
+  ACHDiscountAmount: number;
+  ExciseTaxAmount: number;
+}
 
 interface ProgressCheck {
   ProgressCheckId: number;
@@ -109,6 +144,7 @@ export async function getAssessmentInfo(
   await console.log(
     "Gathering student assessment info. This will take a while...",
   );
+
   for (let i = 0; i < students.length; i++) {
     const student = students[i];
     if (!student) continue;
@@ -156,7 +192,7 @@ export async function getAssessmentInfo(
       );
 
       await writeSpreadsheetData(
-        "Instruction Scheduler",
+        "Instruction Dashboard",
         `Radius Students - HELPER!A${rowNum}:C${rowNum}`,
         [row],
         false,
@@ -259,7 +295,7 @@ export async function getAssessmentInfo(
               );
 
               await writeSpreadsheetData(
-                "Instruction Scheduler",
+                "Instruction Dashboard",
                 `Radius Students - HELPER!D${rowNum}`,
                 [[mostRecentAssessmentDate]],
                 false,
@@ -282,6 +318,12 @@ export async function getAssessmentInfo(
       continue; // Continue to the next student
     }
   }
+
+  // Clear the rest of the student rows, if there are any.
+  await clearSpreadsheetData(
+    "Instruction Dashboard",
+    `Radius Students - HELPER!A${students.length + 2}:D`,
+  );
 }
 
 export async function getCheckedInStudents(page: Page): Promise<string> {
@@ -583,7 +625,7 @@ export async function getAttendanceData(page: Page) {
   await page.goto(
     "https://radius.mathnasium.com/StudentAttendanceMonthlyReport",
   );
-  await page.click("#switch_right");
+  await page.click('label[for="switch_right"]');
   await pressKeyNTimes(page, "Tab", 4);
   await page.keyboard.type(startDateFormatted, { delay: 100 });
   await pressKeyNTimes(page, "Tab", 8);
@@ -647,6 +689,7 @@ export async function retryFailedPayments(page: Page): Promise<string> {
   await console.log("Retrying failed card payments...");
 
   const paymentAttempts: string[] = [];
+  let exceptions: string[] = [];
 
   await page.goto("https://radius.mathnasium.com/BillingExceptionsReport");
   await pressKeyNTimes(page, "Tab", 8);
@@ -697,11 +740,26 @@ export async function retryFailedPayments(page: Page): Promise<string> {
     });
   });
 
-  // Go through each failed payment, skipping exceptions
-  const accountLinkExceptions: string[] = [
-    "https://radius.mathnasium.com/CustomerAccount/Details/cd8c5739-24ce-47dc-a393-e8f650f3233a", // Harrison Baker (Malcolm Baker)
-    "https://radius.mathnasium.com/CustomerAccount/Details/bd77d09b-4ba9-4fe3-98c6-b4db514cd42f", // Ariel Howard (Christian Moody)
-  ];
+  const headerRow = await getSpreadsheetData(
+    "Admin Dashboard",
+    "Exceptions!1:1",
+  );
+  const headerRowData = headerRow[0];
+  const radiusCol = headerRowData?.indexOf("Radius Link");
+  const exceptionsCol = headerRowData?.indexOf("Exception(s)");
+
+  if (radiusCol && exceptionsCol) {
+    const data = await getSpreadsheetData("Admin Dashboard", "Exceptions!A:C");
+    exceptions = data
+      .filter(
+        (row, i) =>
+          i > 0 &&
+          typeof row[exceptionsCol] === "string" &&
+          row[exceptionsCol].includes("Payment Retry"),
+      )
+      .map((row) => row[radiusCol])
+      .filter((row) => typeof row === "string");
+  }
 
   for (let i = 0; i < failedPayments.length; i++) {
     const payment = failedPayments[i];
@@ -714,12 +772,7 @@ export async function retryFailedPayments(page: Page): Promise<string> {
       invoicesLink,
       paymentMethodLink,
     } = payment;
-    if (
-      !paymentMethodLink ||
-      !invoicesLink ||
-      (accountLink && accountLinkExceptions.includes(accountLink))
-    )
-      continue;
+    if (!paymentMethodLink || !invoicesLink) continue;
 
     await page.goto(paymentMethodLink);
     await page.waitForSelector("tr.k-master-row");
@@ -735,10 +788,12 @@ export async function retryFailedPayments(page: Page): Promise<string> {
         (row) => row.cells[2]?.innerText.trim() || "",
       );
 
-      // If it is a card, do something. Otherwise, continue.
+      // If it is a card and not on the exceptions list, retry the payment. Otherwise, continue.
       if (
-        paymentMethod.toLowerCase().includes("credit") ||
-        paymentMethod.toLowerCase().includes("debit")
+        (paymentMethod.toLowerCase().includes("credit") ||
+          paymentMethod.toLowerCase().includes("debit")) &&
+        accountLink &&
+        !exceptions.includes(accountLink)
       ) {
         // Run a one-time payment
         console.log(
@@ -750,25 +805,72 @@ export async function retryFailedPayments(page: Page): Promise<string> {
         await page.keyboard.press("Enter");
         await page.waitForSelector("#miscPmntRadio", {
           timeout: 30000,
+          visible: true,
         });
         await page.click("#miscPmntRadio");
+        await delay(2.5);
         await pressKeyNTimes(page, "Tab", 2);
         await page.keyboard.press("Delete");
-        await page.keyboard.type(String(amount), { delay: 100 });
+        await page.keyboard.type(String(amount + LATE_FEE), { delay: 100 });
         await page.keyboard.press("Tab");
         await page.keyboard.type(
-          `Past due balance with ${dollarFormatter.format(LATE_FEE)} late fee`,
+          `Past due balance with ${dollarFormatter.format(LATE_FEE)} late fee.`,
           { delay: 100 },
         );
         await page.keyboard.press("Tab");
         await page.keyboard.press("Enter");
+        await page.keyboard.press("Tab");
 
-        const successMessage =
-          `${i + 1}. ${accountName}` +
-          `\n  * ${dollarFormatter.format(amount + LATE_FEE)} (${dollarFormatter.format(amount)} + ${dollarFormatter.format(LATE_FEE)} late fee)` +
-          `\n  * Card ending in ${paymentMethod.replace(/\D/g, "")}`;
-        // console.log(successMessage);
-        paymentAttempts.push(successMessage);
+        // Start listening BEFORE clicking to avoid missing the response.
+        const oneTimePaymentResponsePromise = page.waitForResponse(
+          (response) => {
+            const url = new URL(response.url());
+
+            return (
+              url.pathname === "/CustomerAccount/ManageInvoices_Read" &&
+              url.searchParams.has("accountId") &&
+              response.request().method() === "POST" &&
+              response.status() === 200
+            );
+          },
+          { timeout: 10000 },
+        );
+
+        await page.keyboard.press("Enter"); // This processes the payment
+
+        try {
+          const response = await oneTimePaymentResponsePromise;
+          console.log(response);
+
+          const result = (await response.json()) as {
+            Data?: Invoice[];
+            Total?: number;
+            Errors?: unknown;
+          };
+
+          if (result.Errors) {
+            console.error(
+              `${accountName} - Error retrieving invoices:`,
+              result.Errors,
+            );
+          } else {
+            const successMessage =
+              `${i + 1}. ${accountName}` +
+              `\n  * ${dollarFormatter.format(amount + LATE_FEE)} (${dollarFormatter.format(amount)} + ${dollarFormatter.format(LATE_FEE)} late fee)` +
+              `\n  * Card ending in ${paymentMethod.replace(/\D/g, "")}`;
+            // console.log(successMessage);
+            paymentAttempts.push(successMessage);
+          }
+        } catch (error) {
+          console.error(
+            `${accountName} - Invoices failed to load or timed out.`,
+            error,
+          );
+        }
+      } else if (accountLink && exceptions.includes(accountLink)) {
+        console.log(
+          `${accountName}: This account is on the "Exceptions" list. Continuing...`,
+        );
       } else {
         console.log(
           `${accountName}: Active payment method — ${paymentMethod} — is not a card. Continuing...`,
